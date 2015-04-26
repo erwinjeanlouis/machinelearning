@@ -1,0 +1,224 @@
+---
+title: "Machine Learning Project"
+author: "Erwin JeanLouis"
+date: "Saturday, April 25, 2015"
+output: html_document
+---
+
+## Overview : 
+The goal of this analysis is to predict the manner in which the participants did the exercise. The classe variable is what we are trying to predict. I created a report describing how I built your model and how I used cross validation. I also calculate what I think the expected  expected out of sample error is and what choices of machine algorithm I choose.
+
+## Summary:
+I performed various pre processing steps. I removed nearZero columns and removed  columns with a majority (greater than 80 percent) NA values . I reviewed various pre processing and machine learning algorithm. I compared the predicive performance of rpart versus random forest. Rpart was a very fast algorithm, but has poor (how about 50 percent) predictive capability. Random forest is CPU intensive, but has great predictive capability. I recommend using random forest for this analysis
+
+```{r}
+library ( caret )
+set.seed(32343)
+
+```
+## Pre-process helper function. 
+We perform two pre-processing steps
+
+### First Processing Step: 
+Remove NearZeroVar since these columns have very low predictive power. We remove predictor columns that have few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large.
+
+```{r}
+removeZeroVarColumns <- function ( inputData )
+{
+    # Remove nearZeroVar
+    nearZero <- nearZeroVar(inputData)
+    preprocessInputData <- inputData[, -nearZero]
+    return ( preprocessInputData )
+}
+```
+
+### Second processing Step:
+Remove predictor columns that are NA for more than 80% of the values.
+```{r}
+removeNAColumns <- function ( inputData )
+{
+    # Removing columns where NA is more than 80% of the values 
+    percentage <- (sapply(names(inputData), 
+                        function(x) sum(is.na(inputData[,c(x)])))
+                  ) / nrow (inputData)
+    
+    removeNAColumns = c()
+    for(i in 1:length(names(inputData)))
+        if (percentage[[i]] > 0.8 ) removeNAColumns <- c(removeNAColumns, -i)
+    
+    # Getting final processsed data
+    preprocessInputData  <- inputData[, removeNAColumns]   
+    
+    return ( preprocessInputData )
+}
+```
+
+## This helper function excecutes both processing steps outlined above
+I also removed columns I deem irrelevant such as username, rawtimestamp and so on
+
+```{r}
+preProcessData <- function ( inputData )
+{
+    dropColumns <- c ("X", "user_name", "raw_timestamp_part_1"
+               ,"cvtd_timestamp", "new_window", "num_window")
+    
+    columns <- !(names(inputData) %in% dropColumns)
+    
+    inputData <- inputData[,columns]
+    
+    zeroVarInputData <- removeZeroVarColumns (inputData )
+    finalPreprocessInputData <- removeNAColumns ( zeroVarInputData )
+    return ( finalPreprocessInputData )
+}
+```
+
+## Main driver function. This function
+
+Pre-processes the data 
+Predict the results using the model 
+Calculates the confusion matrix so we can determine the predictive efficiency of the model
+
+```{r}
+predictUsingModel <- function( inputData, model, targetColumn , preProcess = TRUE)
+{
+    if (preProcess)
+    {
+        preProcessInputData <- preProcessData ( inputData)
+    }
+    else 
+    {
+        preProcessInputData <- inputData
+    }
+    
+    targetColumnVector <- c(targetColumn)
+    predictColumnNames <- !(names(preProcessInputData) %in% targetColumnVector)
+    dataInputPC <- predict(model, preProcessInputData[, predictColumnNames])
+    return ( dataInputPC)    
+}
+
+computeConfusionMatrix <- function( inputData, model, targetColumn, preProcess = TRUE )
+{
+    dataInputPC <- predictUsingModel ( inputData, model, targetColumn,
+                                       preProcess = preProcess)
+    targetColumnVector <- c(targetColumn)
+    theConfusionMatrix  <- confusionMatrix(inputData[, targetColumnVector], dataInputPC)
+    return ( theConfusionMatrix)
+}
+
+```
+
+## Load the test Data
+
+```{r}
+
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+
+```
+
+## Split the training data into test data and cross validation data. 
+We use 70 percent for actual input data and 30 percent for cross validation
+
+```{r}
+partitionTraining <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+actualTrainingData <- training[partitionTraining, ]; 
+validationData <- training[-partitionTraining, ]
+dim(actualTrainingData); 
+dim(validationData)
+
+```
+
+## Pre process the data. 
+## Train the data. 
+We tested using two algorithm
+rpart (Recursive Partitioning and Regression Trees) and Random Forests. rpart performance was fairly poor (about 50 percent) while random forest was very good. We then focused on Random forest which provided better predictive power.
+
+```{r}
+# Fit using model trees
+finalPreprocessActualTrainingData <- preProcessData( actualTrainingData )
+
+rPartModelFit <- train(classe ~.,data=finalPreprocessActualTrainingData
+                  , method="rpart" )
+
+randomForestModelFit <- train(classe ~.,data=finalPreprocessActualTrainingData
+                              ,method="rf")
+
+```
+
+### Plotting rpart machine learning model (Recursive Partitioning and Regression Trees) decision tree
+
+```{r}
+
+library(rattle)
+library(rpart.plot)
+fancyRpartPlot(rPartModelFit$finalModel)
+
+```
+
+### Calculating predictive capability of the rpart model. As we indicated, this model is extremely fast, but it has poor predictive capability (about 50 percent).  I do not recommend this model
+
+### Clean up the test data and predict the result using the rpart machine learning model. 
+```{r}
+confusionMatrixForTestData <- computeConfusionMatrix (actualTrainingData, rPartModelFit, "classe")
+
+confusionMatrixForTestData$overall
+```
+
+### Clean up the cross-validation  data and predict the result using the rpart model.
+This allows us to compute the out of sample error rate. I expect the error rate from the cross-validation data to be higher than the test data
+
+```{r}
+confusionMatrixForCrossValidationData <- computeConfusionMatrix (validationData, rPartModelFit, "classe")
+
+confusionMatrixForCrossValidationData$overall
+
+```
+
+### Calculating predictive capability of the random forest model. As we indicated, this model is CPU intensive, but it has excellent predictive capability .  I do recommend this model
+
+### Clean up the test data and predict the result using the random forest machine learning model. 
+```{r}
+confusionMatrixForTestData <- computeConfusionMatrix (actualTrainingData, randomForestModelFit, "classe")
+
+confusionMatrixForTestData$overall
+```
+
+### Clean up the cross-validation  data and predict the result using the random forest model.
+This allows us to compute the out of sample error rate. I expect the error rate from the cross-validation data to be higher than the test data
+
+```{r}
+confusionMatrixForCrossValidationData <- computeConfusionMatrix (validationData, randomForestModelFit, "classe")
+
+confusionMatrixForCrossValidationData$overall
+
+```
+
+
+```{r echo = FALSE}
+pmlWriteFiles = function(x)
+{
+    n = length(x)
+    for(i in 1:n)
+    {
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+```
+
+Predicting using the test data
+
+```{r}
+predictionsUsingRPartForTestingData <- predict(rPartModelFit, testing)
+predictionsUsingRandomForestForTestingData <- predict(randomForestModelFit, testing)
+
+predictionsUsingRPartForTestingData
+predictionsUsingRandomForestForTestingData
+
+pmlWriteFiles(predictionsUsingRandomForestForTestingData )
+
+```
